@@ -1,0 +1,30 @@
+name: Günlük Ebay Tarayıcı
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # Her sabah 09:00'da çalışır
+  workflow_dispatch: # İstediğin zaman elle çalıştırma butonu ekler
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu Kopyala
+        uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Kütüphaneleri Yükle
+        run: |
+          pip install feedparser google-generativeai
+
+      - name: Botu Çalıştır
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
+          EBAY_URL: ${{ secrets.EBAY_URL }}
+        run: python main.py
