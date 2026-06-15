@@ -2,7 +2,7 @@ name: Günlük Ebay Tarayıcı
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # Her gün Türkiye saatiyle 12:00'de çalışır
+    - cron: '0 6,12,18 * * *'  # Günde 3 defa otomatik çalışır (Her çalıştığında yeni ilanları yakalar)
   workflow_dispatch:     # Manuel (elle) başlatma butonunu açar
 
 jobs:
