@@ -7,7 +7,6 @@ on:
 
 jobs:
   run-bot:
-    runs-index: 'ubuntu-latest'
     runs-on: ubuntu-latest
     steps:
       - name: Kodları Depodan Çek
