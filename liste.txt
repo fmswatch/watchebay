@@ -1,6 +1,6 @@
-https://www.ebay.de/sch/i.html?_nkw=cartier+uhr&_rss=1&rt=nc&LH_Auction=1
-https://www.ebay.de/b/Longines-Armbanduhren-fur-Herren/31387/bn_13774069?_rss=1&LH_Auction=1&mag=1&rt=nc
-https://www.ebay.de/sch/i.html?_nkw=frederique+constant&_rss=1&_sacat=0&_from=R40&rt=nc&LH_Auction=1
-https://www.ebay.de/sch/i.html?_nkw=venezianico&_rss=1&_sacat=0&_from=R40&LH_Auction=1
-https://www.ebay.de/sch/i.html?_nkw=hamilton&_rss=1&_sacat=260324&_from=R40&LH_Auction=1
-https://www.ebay.de/sch/i.html?_nkw=zeno+watch+basel&_rss=1
+https://www.ebay.de/sch/feed/?_nkw=cartier+uhr+auktion
+https://www.ebay.de/sch/feed/?_nkw=longines+uhr+auktion
+https://www.ebay.de/sch/feed/?_nkw=frederique+constant+auktion
+https://www.ebay.de/sch/feed/?_nkw=venezianico+auktion
+https://www.ebay.de/sch/feed/?_nkw=hamilton+auktion
+https://www.ebay.de/sch/feed/?_nkw=zeno+watch+basel
