@@ -1,60 +1,47 @@
-import google.generativeai as genai
+import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GMAIL_USER = os.environ.get("GMAIL_USER")
-GMAIL_PASS = os.environ.get("GMAIL_PASS")
+GMAIL_USER = os.environ.get('GMAIL_USER')
+GMAIL_PASS = os.environ.get('GMAIL_PASS')
 
-genai.configure(api_key=GEMINI_API_KEY)
+CAMP_ID = "5339157033"
+ARAMALAR = ["tissot+uhr+herren", "cartier+uhr", "hamilton+uhr"]
 
-def ilanlari_tara():
-    if not os.path.exists("liste.txt"):
-        print("liste.txt dosyası bulunamadı!")
-        return
+def rapor_olustur():
+    tum_mesajlar = "📢 EPN DESTEKLİ GÜNLÜK SAAT RAPORU\n"
+    tum_mesajlar += "=========================================\n\n"
+    
+    for kelime in ARAMALAR:
+        # Ebay Partner Network (EPN) kurallarına uygun resmi yönlendirme linki
+        resmi_link = f"https://www.ebay.de/sch/i.html?_nkw={kelime}&_sop=10&mkcid=1&mkrid=707-53477-19255-0&siteid=77&campid={CAMP_ID}&customid=bot-rapor"
         
-    with open("liste.txt", "r", encoding="utf-8") as f:
-        sayfa_icerigi = f.read().strip()
+        tum_mesajlar += f"⌚ Marka/Arama: {kelime.replace('+', ' ').upper()}\n"
+        tum_mesajlar += f"🔗 En Yeni İlanlar (Resmi Link):\n{resmi_link}\n"
+        tum_mesajlar += f"{'-'*40}\n\n"
+        
+    mail_gonder(tum_mesajlar)
 
-    if len(sayfa_icerigi) < 50:
-        print("liste.txt dosyasının içi boş veya çok kısa!")
+def mail_gonder(icerik):
+    if not GMAIL_USER or not GMAIL_PASS:
+        print("HATA: GitHub Secrets ayarlarında GMAIL_USER veya GMAIL_PASS eksik!")
         return
 
-    print("Kopyalanan Ebay içeriği yapay zekaya gönderiliyor...")
-
-    prompt = f"""
-    Aşağıda sana bir Ebay arama sayfasının ham metin içerikleri veriliyor.
-    Bu metnin içindeki saat ilanlarını bul. 
-    Bulduğun en güncel ilanların modelini, mekanizmasını ve fiyatını analiz et.
-    Piyasa değerine göre kelepir mi, ederi mi yoksa pahalı mı belirt.
-    Analizi tamamen Türkçe, kısa ve net maddeler halinde yap.
-
-    Ebay Verisi:
-    {sayfa_icerigi[:15000]}
-    """
-
+    msg = MIMEMultipart()
+    msg['From'] = GMAIL_USER
+    msg['To'] = GMAIL_USER
+    msg['Subject'] = "📢 EPN Güncel Ebay Saat Raporu"
+    msg.attach(MIMEText(icerik, 'plain', 'utf-8'))
+    
     try:
-        model = genai.GenerativeModel('gemini-pro')
-        response = model.generate_content(prompt)
-        analiz = response.text
-        
-        # Mail Gönder
-        msg = MIMEMultipart()
-        msg['From'] = GMAIL_USER
-        msg['To'] = GMAIL_USER
-        msg['Subject'] = "📢 Garantili Ebay Saat Analiz Raporu"
-        msg.attach(MIMEText(analiz, 'plain', 'utf-8'))
-        
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, GMAIL_USER, msg.as_string())
         server.close()
         print("Email başarıyla gönderildi!")
-        
     except Exception as e:
-        print(f"Hata oluştu: {e}")
+        print(f"Email hatası: {e}")
 
 if __name__ == "__main__":
-    ilanlari_tara()
+    rapor_olustur()
