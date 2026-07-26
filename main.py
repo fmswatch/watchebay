@@ -3,72 +3,80 @@ import smtplib
 import urllib.request
 import urllib.parse
 import json
+import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 GMAIL_USER = os.environ.get('GMAIL_USER')
 GMAIL_PASS = os.environ.get('GMAIL_PASS')
 EBAY_APP_ID = os.environ.get('EBAY_APP_ID')
+EBAY_CERT_ID = os.environ.get('EBAY_CERT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 CAMP_ID = "5339157033"
 ARAMALAR = ["panerai uhr", "zeno watch basel", "longines uhr"]
 
-def ebay_veri_cek(kelime):
-    if not EBAY_APP_ID:
-        return None, "HATA: EBAY_APP_ID secret tanimli degil!"
+def ebay_oauth_token_al():
+    if not EBAY_APP_ID or not EBAY_CERT_ID:
+        return None, "HATA: EBAY_APP_ID veya EBAY_CERT_ID eksik!"
 
-    url = "https://svcs.ebay.com/services/search/FindingService/v1"
-
-    # eBay API zorunlu kimlik ve operasyon basliklari
+    auth_header = base64.b64encode(f"{EBAY_APP_ID.strip()}:{EBAY_CERT_ID.strip()}".encode('utf-8')).decode('utf-8')
+    
+    url = "https://api.ebay.com/identity/v1/oauth2/token"
     headers = {
-        "X-EBAY-SOA-OPERATION-NAME": "findItemsByKeywords",
-        "X-EBAY-SOA-SERVICE-VERSION": "1.0.0",
-        "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID.strip(),
-        "X-EBAY-SOA-RESPONSE-DATA-FORMAT": "JSON",
-        "X-EBAY-SOA-GLOBAL-ID": "EBAY-DE",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": f"Basic {auth_header}"
     }
-
-    params = {
-        "keywords": kelime,
-        "paginationInput.entriesPerPage": "2"
-    }
-
-    query_string = urllib.parse.urlencode(params)
-    full_url = f"{url}?{query_string}"
+    data = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "scope": "https://api.ebay.com/oauth/api_scope"
+    }).encode('utf-8')
 
     try:
-        req = urllib.request.Request(full_url, headers=headers)
+        req = urllib.request.Request(url, data=data, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
-            raw_data = response.read().decode('utf-8')
-            res_json = json.loads(raw_data)
+            res_json = json.loads(response.read().decode('utf-8'))
+            return res_json.get("access_token"), None
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8', errors='ignore')
+        return None, f"OAuth Jeton Hatasi (HTTP {e.code}): {err_body}"
+    except Exception as e:
+        return None, f"OAuth Baglanti Hatasi: {str(e)}"
 
-        resp = res_json.get("findItemsByKeywordsResponse", [{}])[0]
-        ack = resp.get("ack", [""])[0]
+def ebay_browse_api_veri_cek(kelime, token):
+    encoded_query = urllib.parse.quote(kelime)
+    url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={encoded_query}&limit=2&sort=newlyListed"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_DE",
+        "User-Agent": "Mozilla/5.0"
+    }
 
-        if ack not in ["Success", "Warning"]:
-            err_msg = resp.get("errorMessage", [{}])[0].get("error", [{}])[0].get("message", ["Bilinmeyen API Hatasi"])[0]
-            return None, f"eBay API Hatasi ({ack}): {err_msg}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            res_json = json.loads(response.read().decode('utf-8'))
 
-        items = resp.get("searchResult", [{}])[0].get("item", [])
+        items = res_json.get("itemSummaries", [])
         if not items:
-            return [], "Bu arama icin ilan bulunamadi."
+            return [], "Bu arama icin aktif ilan bulunamadi."
 
         ilanlar = []
         for item in items:
-            title = item.get("title", ["Ilan Basligi Yok"])[0]
-            price_node = item.get("sellingStatus", [{}])[0].get("currentPrice", [{}])[0]
-            price_val = price_node.get("__value__", "0")
-            curr = price_node.get("@currencyId", "EUR")
-            item_url = item.get("viewItemURL", ["#"])[0]
+            title = item.get("title", "Ilan Basligi Yok")
+            price_dict = item.get("price", {})
+            price_val = price_dict.get("value", "0")
+            curr = price_dict.get("currency", "EUR")
+            item_url = item.get("itemWebUrl", "#")
+            
             ilanlar.append({"title": title, "price": f"{price_val} {curr}", "url": item_url})
 
         return ilanlar, None
 
     except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8', errors='ignore')[:200]
-        return None, f"HTTP {e.code} Hatasi: {err_body}"
+        err_body = e.read().decode('utf-8', errors='ignore')
+        return None, f"Browse API Hatasi (HTTP {e.code}): {err_body}"
     except Exception as e:
         return None, f"Baglanti Hatasi: {str(e)}"
 
@@ -102,15 +110,22 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
         return f"Gemini Analiz Hatasi: {e}"
 
 def rapor_olustur():
+    token, token_hata = ebay_oauth_token_al()
+    
     rapor_satirlari = []
     rapor_satirlari.append("CANLI EBAY VE GEMINI AI SAAT EKSPERTIZ RAPORU")
     rapor_satirlari.append("=========================================\n")
+
+    if not token:
+        rapor_satirlari.append(f"KRITIK HATA: eBay OAuth Jetonu Alinamadi!\nDetay: {token_hata}")
+        mail_gonder("\n".join(rapor_satirlari))
+        return
 
     for kelime in ARAMALAR:
         marka_adi = kelime.upper()
         rapor_satirlari.append(f"--- {marka_adi} EN YENİ İLANLAR ---\n")
 
-        ilanlar, hata = ebay_veri_cek(kelime)
+        ilanlar, hata = ebay_browse_api_veri_cek(kelime, token)
 
         if ilanlar:
             for idx, ilan in enumerate(ilanlar, 1):
