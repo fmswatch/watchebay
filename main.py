@@ -1,51 +1,60 @@
 import os
 import smtplib
 import urllib.request
+import urllib.parse
 import json
-import xml.etree.ElementTree as ET
-import re
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 GMAIL_USER = os.environ.get('GMAIL_USER')
 GMAIL_PASS = os.environ.get('GMAIL_PASS')
+EBAY_APP_ID = os.environ.get('EBAY_APP_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 CAMP_ID = "5339157033"
-ARAMALAR = ["panerai+uhr", "zeno+watch+basel", "longines+uhr"]
+ARAMALAR = ["panerai uhr", "zeno watch basel", "longines uhr"]
 
-def ebay_rss_veri_cek(kelime):
-    # eBay RSS akışı IP engellerine takılmaz ve anlık ilanları sunar
-    url = f"https://www.ebay.de/sch/i.html?_nkw={kelime}&_sop=10&_rss=1"
+def ebay_resmi_api_veri_cek(kelime):
+    if not EBAY_APP_ID:
+        print("HATA: EBAY_APP_ID eklenmedi.")
+        return []
+
+    url = "https://svcs.ebay.com/services/search/FindingService/v1"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        "X-EBAY-SOA-OPERATION-NAME": "findItemsAdvanced",
+        "X-EBAY-SOA-SERVICE-VERSION": "1.0.0",
+        "X-EBAY-SOA-REQUEST-DATA-FORMAT": "JSON",
+        "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID,
+        "X-EBAY-SOA-GLOBAL-ID": "EBAY-DE"
     }
+
+    params = {
+        "keywords": kelime,
+        "sortOrder": "StartTimeNewest",
+        "paginationInput.entriesPerPage": "2"
+    }
+
     try:
-        req = urllib.request.Request(url, headers=headers)
+        query_string = urllib.parse.urlencode(params)
+        full_url = f"{url}?{query_string}"
+        req = urllib.request.Request(full_url, headers=headers)
+        
         with urllib.request.urlopen(req, timeout=15) as response:
-            xml_data = response.read()
+            res_json = json.loads(response.read().decode('utf-8'))
+
+        items = res_json.get("findItemsAdvancedResponse", [{}])[0].get("searchResult", [{}])[0].get("item", [])
         
-        root = ET.fromstring(xml_data)
-        items = root.findall('.//item')
-        
-        gecerli_ilanlar = []
-        for item in items[:2]: # Her marka için en yeni 2 ilan
-            title = item.find('title').text if item.find('title') is not None else ""
-            link = item.find('link').text if item.find('link') is not None else ""
-            description = item.find('description').text if item.find('description') is not None else ""
+        ilanlar = []
+        for item in items:
+            title = item.get("title", [""])[0]
+            price = item.get("sellingStatus", [{}])[0].get("currentPrice", [{}])[0].get("__value__", "0")
+            currency = item.get("sellingStatus", [{}])[0].get("currentPrice", [{}])[0].get("@currencyId", "EUR")
+            item_url = item.get("viewItemURL", [""])[0]
+            ilanlar.append({"title": title, "price": f"{price} {currency}", "url": item_url})
             
-            # Açıklamadan veya başlıktan fiyatı çekme
-            fiyat_match = re.search(r'EUR\s*[\d\.,]+|[\d\.,]+\s*EUR', description)
-            fiyat = fiyat_match.group(0) if fiyat_match else "Fiyat belirtilmedi"
-            
-            if title:
-                # Başlığı temizleme
-                title_clean = re.sub(r'[^\w\s]', '', title)
-                gecerli_ilanlar.append((title_clean, fiyat, link))
-                
-        return gecerli_ilanlar
+        return ilanlar
     except Exception as e:
-        print(f"RSS Hatasi: {e}")
+        print(f"eBay API Hatasi: {e}")
         return []
 
 def gemini_gercek_ekspertiz(baslik, fiyat):
@@ -75,7 +84,7 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
             analiz = res_json['candidates'][0]['content']['parts'][0]['text']
             return analiz.strip()
     except Exception as e:
-        return "Yapay zeka analizi anlik alınamadı."
+        return "Yapay zeka analizi anlik alinamadi."
 
 def rapor_olustur():
     rapor_satirlari = []
@@ -83,21 +92,21 @@ def rapor_olustur():
     rapor_satirlari.append("=========================================\n")
 
     for kelime in ARAMALAR:
-        marka_adi = kelime.replace('+', ' ').upper()
+        marka_adi = kelime.upper()
         rapor_satirlari.append(f"--- {marka_adi} EN YENİ İLANLAR ---\n")
         
-        ilanlar = ebay_rss_veri_cek(kelime)
+        ilanlar = ebay_resmi_api_veri_cek(kelime)
 
         if ilanlar:
-            for idx, (baslik, fiyat, link) in enumerate(ilanlar, 1):
-                analiz = gemini_gercek_ekspertiz(baslik, fiyat)
-                rapor_satirlari.append(f"Ilan {idx}: {baslik}")
-                rapor_satirlari.append(f"Fiyat: {fiyat}")
+            for idx, ilan in enumerate(ilanlar, 1):
+                analiz = gemini_gercek_ekspertiz(ilan['title'], ilan['price'])
+                rapor_satirlari.append(f"Ilan {idx}: {ilan['title']}")
+                rapor_satirlari.append(f"Fiyat: {ilan['price']}")
                 rapor_satirlari.append(f"Ekspertiz Analizi:\n{analiz}")
-                rapor_satirlari.append(f"Ilan Linki: {link}\n")
+                rapor_satirlari.append(f"Ilan Linki: {ilan['url']}\n")
         else:
-            resmi_link = f"https://www.ebay.de/sch/i.html?_nkw={kelime}&_sop=10&campid={CAMP_ID}"
-            rapor_satirlari.append(f"Veri akisi saglanamadi. Arama linki: {resmi_link}\n")
+            resmi_link = f"https://www.ebay.de/sch/i.html?_nkw={urllib.parse.quote(kelime)}&_sop=10&campid={CAMP_ID}"
+            rapor_satirlari.append(f"API verisi alinamadi. Arama linki: {resmi_link}\n")
 
     tam_metin = "\n".join(rapor_satirlari)
     mail_gonder(tam_metin)
@@ -117,8 +126,8 @@ def mail_gonder(icerik):
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, GMAIL_USER, msg.as_string())
         server.close()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Mail gönderme hatasi: {e}")
 
 if __name__ == "__main__":
     rapor_olustur()
