@@ -18,23 +18,28 @@ def ebay_veri_cek(kelime):
     if not EBAY_APP_ID:
         return None, "HATA: EBAY_APP_ID secret tanimli degil!"
 
-    # eBay Finding REST Service parametreleri
+    url = "https://svcs.ebay.com/services/search/FindingService/v1"
+
+    # eBay API zorunlu kimlik ve operasyon basliklari
+    headers = {
+        "X-EBAY-SOA-OPERATION-NAME": "findItemsByKeywords",
+        "X-EBAY-SOA-SERVICE-VERSION": "1.0.0",
+        "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID.strip(),
+        "X-EBAY-SOA-RESPONSE-DATA-FORMAT": "JSON",
+        "X-EBAY-SOA-GLOBAL-ID": "EBAY-DE",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
+
     params = {
-        "OPERATION-NAME": "findItemsByKeywords",
-        "SERVICE-VERSION": "1.0.0",
-        "SECURITY-APPNAME": EBAY_APP_ID.strip(),
-        "RESPONSE-DATA-FORMAT": "JSON",
-        "REST-PAYLOAD": "true",
-        "GLOBAL-ID": "EBAY-DE",
         "keywords": kelime,
         "paginationInput.entriesPerPage": "2"
     }
 
     query_string = urllib.parse.urlencode(params)
-    full_url = f"https://svcs.ebay.com/services/search/FindingService/v1?{query_string}"
+    full_url = f"{url}?{query_string}"
 
     try:
-        req = urllib.request.Request(full_url, headers={'User-Agent': 'Mozilla/5.0'})
+        req = urllib.request.Request(full_url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
             raw_data = response.read().decode('utf-8')
             res_json = json.loads(raw_data)
@@ -75,7 +80,7 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
     headers = {'Content-Type': 'application/json'}
 
     prompt = (
-        f"Sen bir luks saat uzmanisiniz. eBay Almanya üzerinde yeni listelenen su saati analiz et:\n"
+        f"Sen bir luks saat uzmanisiniz. eBay Almanya uzerinde yeni listelenen su ilani analiz et:\n"
         f"Saat Adi: {baslik}\n"
         f"Fiyat: {fiyat}\n\n"
         f"Lutfen Türkçe olarak su 3 soruyu kısa ve net yanıtla:\n"
