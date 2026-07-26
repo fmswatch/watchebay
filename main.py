@@ -14,7 +14,7 @@ EBAY_CERT_ID = os.environ.get('EBAY_CERT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 CAMP_ID = "5339157033"
-ARAMALAR = ["panerai uhr", "zeno watch basel", "longines uhr"]
+ARAMALAR = ["panerai", "zeno watch basel", "longines"]
 
 def ebay_oauth_token_al():
     if not EBAY_APP_ID or not EBAY_CERT_ID:
@@ -37,15 +37,13 @@ def ebay_oauth_token_al():
         with urllib.request.urlopen(req, timeout=15) as response:
             res_json = json.loads(response.read().decode('utf-8'))
             return res_json.get("access_token"), None
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8', errors='ignore')
-        return None, f"OAuth Jeton Hatasi (HTTP {e.code}): {err_body}"
     except Exception as e:
         return None, f"OAuth Baglanti Hatasi: {str(e)}"
 
 def ebay_browse_api_veri_cek(kelime, token):
     encoded_query = urllib.parse.quote(kelime)
-    url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={encoded_query}&limit=2&sort=newlyListed"
+    # category_ids=31387 eklenerek SADECE "Kol Saatleri" kategorisindeki urunler filtreler
+    url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={encoded_query}&category_ids=31387&limit=2&sort=newlyListed"
     
     headers = {
         "Authorization": f"Bearer {token}",
@@ -60,7 +58,7 @@ def ebay_browse_api_veri_cek(kelime, token):
 
         items = res_json.get("itemSummaries", [])
         if not items:
-            return [], "Bu arama icin aktif ilan bulunamadi."
+            return [], "Bu arama icin aktif kol saati ilani bulunamadi."
 
         ilanlar = []
         for item in items:
@@ -74,18 +72,15 @@ def ebay_browse_api_veri_cek(kelime, token):
 
         return ilanlar, None
 
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8', errors='ignore')
-        return None, f"Browse API Hatasi (HTTP {e.code}): {err_body}"
     except Exception as e:
-        return None, f"Baglanti Hatasi: {str(e)}"
+        return None, f"Browse API Hatasi: {str(e)}"
 
 def gemini_gercek_ekspertiz(baslik, fiyat):
     if not GEMINI_API_KEY:
         return "Gemini API Key bulunamadi."
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    headers = {'Content-Type': 'application/json'}
+    # Gemini model yedekli liste
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
     prompt = (
         f"Sen bir luks saat uzmanisiniz. eBay Almanya uzerinde yeni listelenen su ilani analiz et:\n"
@@ -99,15 +94,20 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
     )
 
     data = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
+    headers = {'Content-Type': 'application/json'}
 
-    try:
-        req = urllib.request.Request(url, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            res_json = json.loads(response.read().decode('utf-8'))
-            analiz = res_json['candidates'][0]['content']['parts'][0]['text']
-            return analiz.strip()
-    except Exception as e:
-        return f"Gemini Analiz Hatasi: {e}"
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                res_json = json.loads(response.read().decode('utf-8'))
+                analiz = res_json['candidates'][0]['content']['parts'][0]['text']
+                return analiz.strip()
+        except Exception:
+            continue
+
+    return "Yapay zeka analizi anlik olarak alinamadi."
 
 def rapor_olustur():
     token, token_hata = ebay_oauth_token_al()
