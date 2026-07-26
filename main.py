@@ -14,7 +14,8 @@ EBAY_CERT_ID = os.environ.get('EBAY_CERT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 CAMP_ID = "5339157033"
-ARAMALAR = ["panerai", "zeno watch basel", "longines"]
+# Sadece Panerai araması
+ARAMALAR = ["panerai"]
 
 def ebay_oauth_token_al():
     if not EBAY_APP_ID or not EBAY_CERT_ID:
@@ -41,9 +42,17 @@ def ebay_oauth_token_al():
         return None, f"OAuth Baglanti Hatasi: {str(e)}"
 
 def ebay_browse_api_veri_cek(kelime, token):
-    encoded_query = urllib.parse.quote(kelime)
-    # category_ids=31387 eklenerek SADECE "Kol Saatleri" kategorisindeki urunler filtreler
-    url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={encoded_query}&category_ids=31387&limit=2&sort=newlyListed"
+    # Kol Saatleri Kategorisi (31387) + Minimum 2000 EUR Fiyat Filtresi
+    params = {
+        "q": kelime,
+        "category_ids": "31387",
+        "filter": "price:[2000..],priceCurrency:EUR",
+        "limit": "3",
+        "sort": "newlyListed"
+    }
+    
+    query_string = urllib.parse.urlencode(params)
+    url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?{query_string}"
     
     headers = {
         "Authorization": f"Bearer {token}",
@@ -58,7 +67,7 @@ def ebay_browse_api_veri_cek(kelime, token):
 
         items = res_json.get("itemSummaries", [])
         if not items:
-            return [], "Bu arama icin aktif kol saati ilani bulunamadi."
+            return [], "2000 EUR uzerinde Panerai ilani bulunamadi."
 
         ilanlar = []
         for item in items:
@@ -68,6 +77,13 @@ def ebay_browse_api_veri_cek(kelime, token):
             curr = price_dict.get("currency", "EUR")
             item_url = item.get("itemWebUrl", "#")
             
+            # Kod seviyesinde 2000 EUR altini teyit amacli filtresi
+            try:
+                if float(price_val) < 2000:
+                    continue
+            except ValueError:
+                pass
+
             ilanlar.append({"title": title, "price": f"{price_val} {curr}", "url": item_url})
 
         return ilanlar, None
@@ -77,10 +93,11 @@ def ebay_browse_api_veri_cek(kelime, token):
 
 def gemini_gercek_ekspertiz(baslik, fiyat):
     if not GEMINI_API_KEY:
-        return "Gemini API Key bulunamadi."
+        return "HATA: GEMINI_API_KEY GitHub Secret icinde bulunamadi!"
 
-    # Gemini model yedekli liste
-    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    api_key = GEMINI_API_KEY.strip()
+    # Gemini resmi çalışan model isimleri
+    models = ["gemini-1.5-flash", "gemini-2.0-flash"]
 
     prompt = (
         f"Sen bir luks saat uzmanisiniz. eBay Almanya uzerinde yeni listelenen su ilani analiz et:\n"
@@ -96,25 +113,29 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
     data = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
     headers = {'Content-Type': 'application/json'}
 
+    detayli_hata = ""
     for model in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         try:
             req = urllib.request.Request(url, data=data, headers=headers)
             with urllib.request.urlopen(req, timeout=15) as response:
                 res_json = json.loads(response.read().decode('utf-8'))
                 analiz = res_json['candidates'][0]['content']['parts'][0]['text']
                 return analiz.strip()
-        except Exception:
-            continue
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', errors='ignore')[:200]
+            detayli_hata += f"[{model} -> HTTP {e.code}: {err_body}] "
+        except Exception as e:
+            detayli_hata += f"[{model} -> {str(e)}] "
 
-    return "Yapay zeka analizi anlik olarak alinamadi."
+    return f"Gemini Baglanti Hatasi: {detayli_hata}"
 
 def rapor_olustur():
     token, token_hata = ebay_oauth_token_al()
     
     rapor_satirlari = []
-    rapor_satirlari.append("CANLI EBAY VE GEMINI AI SAAT EKSPERTIZ RAPORU")
-    rapor_satirlari.append("=========================================\n")
+    rapor_satirlari.append("CANLI EBAY VE GEMINI AI SAAT EKSPERTIZ RAPORU (MIN 2000 EUR)")
+    rapor_satirlari.append("=========================================================\n")
 
     if not token:
         rapor_satirlari.append(f"KRITIK HATA: eBay OAuth Jetonu Alinamadi!\nDetay: {token_hata}")
@@ -123,7 +144,7 @@ def rapor_olustur():
 
     for kelime in ARAMALAR:
         marka_adi = kelime.upper()
-        rapor_satirlari.append(f"--- {marka_adi} EN YENİ İLANLAR ---\n")
+        rapor_satirlari.append(f"--- {marka_adi} (2000 EUR+) EN YENİ İLANLAR ---\n")
 
         ilanlar, hata = ebay_browse_api_veri_cek(kelime, token)
 
@@ -147,7 +168,7 @@ def mail_gonder(icerik):
     msg = MIMEMultipart()
     msg['From'] = GMAIL_USER
     msg['To'] = GMAIL_USER
-    msg['Subject'] = "Canli Saat Ekspertiz Raporu"
+    msg['Subject'] = "Canli Panerai Saat Ekspertiz Raporu (2000 EUR+)"
     msg.attach(MIMEText(icerik, 'plain', 'utf-8'))
 
     try:
