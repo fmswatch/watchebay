@@ -14,47 +14,58 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 CAMP_ID = "5339157033"
 ARAMALAR = ["panerai uhr", "zeno watch basel", "longines uhr"]
 
-def ebay_resmi_api_veri_cek(kelime):
+def ebay_veri_cek(kelime):
     if not EBAY_APP_ID:
-        return []
+        return None, "HATA: EBAY_APP_ID secret tanimli degil!"
 
-    url = "https://svcs.ebay.com/services/search/FindingService/v1"
-    headers = {
-        "X-EBAY-SOA-OPERATION-NAME": "findItemsAdvanced",
-        "X-EBAY-SOA-SERVICE-VERSION": "1.0.0",
-        "X-EBAY-SOA-REQUEST-DATA-FORMAT": "JSON",
-        "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID,
-        "X-EBAY-SOA-GLOBAL-ID": "EBAY-DE"
-    }
-
+    # eBay Finding REST Service parametreleri
     params = {
+        "OPERATION-NAME": "findItemsByKeywords",
+        "SERVICE-VERSION": "1.0.0",
+        "SECURITY-APPNAME": EBAY_APP_ID.strip(),
+        "RESPONSE-DATA-FORMAT": "JSON",
+        "REST-PAYLOAD": "true",
+        "GLOBAL-ID": "EBAY-DE",
         "keywords": kelime,
-        "sortOrder": "StartTimeNewest",
         "paginationInput.entriesPerPage": "2"
     }
 
-    try:
-        query_string = urllib.parse.urlencode(params)
-        full_url = f"{url}?{query_string}"
-        req = urllib.request.Request(full_url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            res_json = json.loads(response.read().decode('utf-8'))
+    query_string = urllib.parse.urlencode(params)
+    full_url = f"https://svcs.ebay.com/services/search/FindingService/v1?{query_string}"
 
-        items = res_json.get("findItemsAdvancedResponse", [{}])[0].get("searchResult", [{}])[0].get("item", [])
-        
+    try:
+        req = urllib.request.Request(full_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            raw_data = response.read().decode('utf-8')
+            res_json = json.loads(raw_data)
+
+        resp = res_json.get("findItemsByKeywordsResponse", [{}])[0]
+        ack = resp.get("ack", [""])[0]
+
+        if ack not in ["Success", "Warning"]:
+            err_msg = resp.get("errorMessage", [{}])[0].get("error", [{}])[0].get("message", ["Bilinmeyen API Hatasi"])[0]
+            return None, f"eBay API Hatasi ({ack}): {err_msg}"
+
+        items = resp.get("searchResult", [{}])[0].get("item", [])
+        if not items:
+            return [], "Bu arama icin ilan bulunamadi."
+
         ilanlar = []
         for item in items:
-            title = item.get("title", [""])[0]
-            price = item.get("sellingStatus", [{}])[0].get("currentPrice", [{}])[0].get("__value__", "0")
-            currency = item.get("sellingStatus", [{}])[0].get("currentPrice", [{}])[0].get("@currencyId", "EUR")
-            item_url = item.get("viewItemURL", [""])[0]
-            ilanlar.append({"title": title, "price": f"{price} {currency}", "url": item_url})
-            
-        return ilanlar
+            title = item.get("title", ["Ilan Basligi Yok"])[0]
+            price_node = item.get("sellingStatus", [{}])[0].get("currentPrice", [{}])[0]
+            price_val = price_node.get("__value__", "0")
+            curr = price_node.get("@currencyId", "EUR")
+            item_url = item.get("viewItemURL", ["#"])[0]
+            ilanlar.append({"title": title, "price": f"{price_val} {curr}", "url": item_url})
+
+        return ilanlar, None
+
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8', errors='ignore')[:200]
+        return None, f"HTTP {e.code} Hatasi: {err_body}"
     except Exception as e:
-        print(f"eBay API Hatasi: {e}")
-        return []
+        return None, f"Baglanti Hatasi: {str(e)}"
 
 def gemini_gercek_ekspertiz(baslik, fiyat):
     if not GEMINI_API_KEY:
@@ -64,14 +75,14 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
     headers = {'Content-Type': 'application/json'}
 
     prompt = (
-        f"Sen luks saat uzmanisiniz. eBay Almanya uzerinde yeni listelenen su ilani analiz et:\n"
+        f"Sen bir luks saat uzmanisiniz. eBay Almanya üzerinde yeni listelenen su saati analiz et:\n"
         f"Saat Adi: {baslik}\n"
         f"Fiyat: {fiyat}\n\n"
         f"Lutfen Türkçe olarak su 3 soruyu kısa ve net yanıtla:\n"
         f"1. Tahmini piyasa degeri nedir?\n"
         f"2. Bu fiyat kelepir mi, normal mi, pahali mi?\n"
-        f"3. Alirken neye dikkat edilmeli?\n"
-        f"Hicbir emoji veya ozel sembol kullanma. Sadece net metin yaz."
+        f"3. Alırken neye dikkat edilmeli?\n"
+        f"Sadece net metin yaz, emoji kullanma."
     )
 
     data = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
@@ -83,7 +94,7 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
             analiz = res_json['candidates'][0]['content']['parts'][0]['text']
             return analiz.strip()
     except Exception as e:
-        return "Yapay zeka analizi anlik alinamadi."
+        return f"Gemini Analiz Hatasi: {e}"
 
 def rapor_olustur():
     rapor_satirlari = []
@@ -93,8 +104,8 @@ def rapor_olustur():
     for kelime in ARAMALAR:
         marka_adi = kelime.upper()
         rapor_satirlari.append(f"--- {marka_adi} EN YENİ İLANLAR ---\n")
-        
-        ilanlar = ebay_resmi_api_veri_cek(kelime)
+
+        ilanlar, hata = ebay_veri_cek(kelime)
 
         if ilanlar:
             for idx, ilan in enumerate(ilanlar, 1):
@@ -104,8 +115,7 @@ def rapor_olustur():
                 rapor_satirlari.append(f"Ekspertiz Analizi:\n{analiz}")
                 rapor_satirlari.append(f"Ilan Linki: {ilan['url']}\n")
         else:
-            resmi_link = f"https://www.ebay.de/sch/i.html?_nkw={urllib.parse.quote(kelime)}&_sop=10&campid={CAMP_ID}"
-            rapor_satirlari.append(f"Canli ilan cekilemedi. Arama linki: {resmi_link}\n")
+            rapor_satirlari.append(f"DURUM / HATA: {hata}\n")
 
     tam_metin = "\n".join(rapor_satirlari)
     mail_gonder(tam_metin)
@@ -117,7 +127,7 @@ def mail_gonder(icerik):
     msg = MIMEMultipart()
     msg['From'] = GMAIL_USER
     msg['To'] = GMAIL_USER
-    msg['Subject'] = "Canli Saat Ekspertiz Raporu (Panerai, Zeno, Longines)"
+    msg['Subject'] = "Canli Saat Ekspertiz Raporu"
     msg.attach(MIMEText(icerik, 'plain', 'utf-8'))
 
     try:
@@ -126,7 +136,7 @@ def mail_gonder(icerik):
         server.sendmail(GMAIL_USER, GMAIL_USER, msg.as_string())
         server.close()
     except Exception as e:
-        print(f"Mail gönderme hatasi: {e}")
+        print(f"Mail gonderme hatasi: {e}")
 
 if __name__ == "__main__":
     rapor_olustur()
