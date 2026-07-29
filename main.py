@@ -110,7 +110,6 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
     data = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
     headers = {'Content-Type': 'application/json'}
 
-    # Mevcut tum API key'leri sirayla dener
     for api_key in GEMINI_KEYS:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
         try:
@@ -121,14 +120,13 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
                 return analiz.strip()
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                # Kota dolduysa bir sonraki anahtara geç
                 continue
             else:
                 return f"Gemini HTTP Hatasi ({e.code})"
         except Exception as e:
             return f"Gemini Baglanti Hatasi: {str(e)}"
 
-    return "HATA (HTTP 429): Tum Gemini API Key'lerinin gunluk kotasi doldu! Lutfen yeni bir API Key ekleyin."
+    return "HATA (HTTP 429): Tum Gemini API Key'lerinin gunluk kotasi doldu! Yarinki otomatik calismada kota sifirlanacaktir."
 
 def rapor_olustur():
     token, token_hata = ebay_oauth_token_al()
@@ -155,7 +153,7 @@ def rapor_olustur():
                 rapor_satirlari.append(f"Fiyat: {ilan['price']}")
                 rapor_satirlari.append(f"Ekspertiz Analizi:\n{analiz}")
                 rapor_satirlari.append(f"Ilan Linki: {ilan['url']}\n")
-                time.sleep(2)
+                time.sleep(3)
         else:
             rapor_satirlari.append(f"DURUM / HATA: {hata}\n")
 
