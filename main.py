@@ -4,6 +4,7 @@ import urllib.request
 import urllib.parse
 import json
 import base64
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -13,8 +14,6 @@ EBAY_APP_ID = os.environ.get('EBAY_APP_ID')
 EBAY_CERT_ID = os.environ.get('EBAY_CERT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-CAMP_ID = "5339157033"
-# Sadece Panerai araması
 ARAMALAR = ["panerai"]
 
 def ebay_oauth_token_al():
@@ -42,7 +41,6 @@ def ebay_oauth_token_al():
         return None, f"OAuth Baglanti Hatasi: {str(e)}"
 
 def ebay_browse_api_veri_cek(kelime, token):
-    # Kol Saatleri Kategorisi (31387) + Minimum 2000 EUR Fiyat Filtresi
     params = {
         "q": kelime,
         "category_ids": "31387",
@@ -77,7 +75,6 @@ def ebay_browse_api_veri_cek(kelime, token):
             curr = price_dict.get("currency", "EUR")
             item_url = item.get("itemWebUrl", "#")
             
-            # Kod seviyesinde 2000 EUR altini teyit amacli filtresi
             try:
                 if float(price_val) < 2000:
                     continue
@@ -93,11 +90,16 @@ def ebay_browse_api_veri_cek(kelime, token):
 
 def gemini_gercek_ekspertiz(baslik, fiyat):
     if not GEMINI_API_KEY:
-        return "HATA: GEMINI_API_KEY GitHub Secret icinde bulunamadi!"
+        return "HATA: GEMINI_API_KEY bulunamadi!"
 
     api_key = GEMINI_API_KEY.strip()
-    # Gemini resmi çalışan model isimleri
-    models = ["gemini-1.5-flash", "gemini-2.0-flash"]
+    
+    # Dogru API surumlerine gore tanimlanmis endpoint listesi
+    endpoints = [
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={api_key}",
+        f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+    ]
 
     prompt = (
         f"Sen bir luks saat uzmanisiniz. eBay Almanya uzerinde yeni listelenen su ilani analiz et:\n"
@@ -113,22 +115,25 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
     data = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
     headers = {'Content-Type': 'application/json'}
 
-    detayli_hata = ""
-    for model in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        try:
-            req = urllib.request.Request(url, data=data, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as response:
-                res_json = json.loads(response.read().decode('utf-8'))
-                analiz = res_json['candidates'][0]['content']['parts'][0]['text']
-                return analiz.strip()
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode('utf-8', errors='ignore')[:200]
-            detayli_hata += f"[{model} -> HTTP {e.code}: {err_body}] "
-        except Exception as e:
-            detayli_hata += f"[{model} -> {str(e)}] "
+    for url in endpoints:
+        for deneme in range(3):
+            try:
+                req = urllib.request.Request(url, data=data, headers=headers)
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    res_json = json.loads(response.read().decode('utf-8'))
+                    analiz = res_json['candidates'][0]['content']['parts'][0]['text']
+                    return analiz.strip()
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    # Dakikalik istek limitine takilindiysa 10 saniye bekle
+                    time.sleep(10)
+                    continue
+                else:
+                    break
+            except Exception:
+                break
 
-    return f"Gemini Baglanti Hatasi: {detayli_hata}"
+    return "Gemini ekspertiz analizi gecici olarak alinAMADI (Dakikalik API limiti asildi)."
 
 def rapor_olustur():
     token, token_hata = ebay_oauth_token_al()
@@ -155,6 +160,8 @@ def rapor_olustur():
                 rapor_satirlari.append(f"Fiyat: {ilan['price']}")
                 rapor_satirlari.append(f"Ekspertiz Analizi:\n{analiz}")
                 rapor_satirlari.append(f"Ilan Linki: {ilan['url']}\n")
+                # İstekler arasi kota asimini engellemek icin 5 saniye bekleme
+                time.sleep(5)
         else:
             rapor_satirlari.append(f"DURUM / HATA: {hata}\n")
 
