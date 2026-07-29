@@ -12,7 +12,11 @@ GMAIL_USER = os.environ.get('GMAIL_USER')
 GMAIL_PASS = os.environ.get('GMAIL_PASS')
 EBAY_APP_ID = os.environ.get('EBAY_APP_ID')
 EBAY_CERT_ID = os.environ.get('EBAY_CERT_ID')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+
+# Ana ve Yedek API Anahtarlarını alıyoruz
+GEMINI_KEYS = [
+    k.strip() for k in [os.environ.get('GEMINI_API_KEY'), os.environ.get('GEMINI_API_KEY_2')] if k
+]
 
 ARAMALAR = ["panerai"]
 
@@ -89,11 +93,8 @@ def ebay_browse_api_veri_cek(kelime, token):
         return None, f"Browse API Hatasi: {str(e)}"
 
 def gemini_gercek_ekspertiz(baslik, fiyat):
-    if not GEMINI_API_KEY:
-        return "HATA: GEMINI_API_KEY bulunamadi!"
-
-    api_key = GEMINI_API_KEY.strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    if not GEMINI_KEYS:
+        return "HATA: Hicbir GEMINI_API_KEY bulunamadi!"
 
     prompt = (
         f"Sen bir luks saat uzmanisiniz. eBay Almanya uzerinde yeni listelenen su ilani analiz et:\n"
@@ -109,22 +110,25 @@ def gemini_gercek_ekspertiz(baslik, fiyat):
     data = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode('utf-8')
     headers = {'Content-Type': 'application/json'}
 
-    try:
-        req = urllib.request.Request(url, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            res_json = json.loads(response.read().decode('utf-8'))
-            analiz = res_json['candidates'][0]['content']['parts'][0]['text']
-            return analiz.strip()
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8', errors='ignore')
-        if e.code == 429:
-            return "HATA (HTTP 429): API Key gunluk kotasi doldu! Lutfen Google AI Studio'dan yeni bir GEMINI_API_KEY alin."
-        elif e.code == 400:
-            return f"HATA (HTTP 400): API Key gecersiz veya istek formati hatali."
-        else:
-            return f"Gemini HTTP Hatasi ({e.code}): {err_body[:100]}"
-    except Exception as e:
-        return f"Gemini Baglanti Hatasi: {str(e)}"
+    # Mevcut tum API key'leri sirayla dener
+    for api_key in GEMINI_KEYS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                res_json = json.loads(response.read().decode('utf-8'))
+                analiz = res_json['candidates'][0]['content']['parts'][0]['text']
+                return analiz.strip()
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                # Kota dolduysa bir sonraki anahtara geç
+                continue
+            else:
+                return f"Gemini HTTP Hatasi ({e.code})"
+        except Exception as e:
+            return f"Gemini Baglanti Hatasi: {str(e)}"
+
+    return "HATA (HTTP 429): Tum Gemini API Key'lerinin gunluk kotasi doldu! Lutfen yeni bir API Key ekleyin."
 
 def rapor_olustur():
     token, token_hata = ebay_oauth_token_al()
@@ -151,7 +155,7 @@ def rapor_olustur():
                 rapor_satirlari.append(f"Fiyat: {ilan['price']}")
                 rapor_satirlari.append(f"Ekspertiz Analizi:\n{analiz}")
                 rapor_satirlari.append(f"Ilan Linki: {ilan['url']}\n")
-                time.sleep(3)
+                time.sleep(2)
         else:
             rapor_satirlari.append(f"DURUM / HATA: {hata}\n")
 
